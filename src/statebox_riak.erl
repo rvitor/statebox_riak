@@ -8,7 +8,7 @@
 
 -type statebox() :: statebox:statebox().
 -type op() :: statebox:op().
--type riakc_obj() :: riakc_obj:riakc_obj().
+-type riakc_obj() :: riakc_obj:riakc_obj() | riak_object:riak_object().
 -type bucket() :: binary().
 -type key() :: binary().
 -type get_fun() :: fun ((bucket(), key()) -> {ok, riakc_obj()} | {error, notfound | term()}).
@@ -28,7 +28,8 @@
           truncate=fun ?MODULE:identity/1 :: statebox_transform_fun(),
           expire=fun ?MODULE:identity/1 :: statebox_transform_fun(),
           serialize=fun ?MODULE:serialize/1 :: serialize_fun(),
-          deserialize=fun ?MODULE:deserialize/1 :: deserialize_fun()}).
+          deserialize=fun ?MODULE:deserialize/1 :: deserialize_fun(),
+          obj_module :: list()}).
 
 -opaque statebox_riak() :: #statebox_riak{}.
 -type option() :: {get, get_fun()} |
@@ -39,6 +40,7 @@
                   {expire_ms, undefined | statebox:timedelta()} |
                   {serialize, serialize_fun()} |
                   {deserialize, deserialize_fun()} |
+                  {native_client, term()} |
                   {riakc_pb_socket, pid()}.
 
 %% External API
@@ -194,29 +196,41 @@ parse_option({resolve_metadatas, ResolveMetadatas}, S) ->
     S#statebox_riak{resolve_metadatas=ResolveMetadatas};
 parse_option({from_values, FromValues}, S) ->
     S#statebox_riak{from_values=FromValues};
+parse_option({native_client, Client}, S) ->
+    Get = fun (Bucket, Key) -> Client:get(Bucket, maybe_binary(Key)) end,
+    Put = fun (Obj) -> ok = Client:put(Obj) end,
+    parse_option({get, Get}, parse_option({put, Put}, S#statebox_riak{obj_module = riak_object}));
 parse_option({riakc_pb_socket, Pid}, S) ->
     Get = fun (Bucket, Key) -> riakc_pb_socket:get(Pid, Bucket, Key) end,
     Put = fun (Obj) -> ok = riakc_pb_socket:put(Pid, Obj) end,
-    parse_option({get, Get}, parse_option({put, Put}, S)).
+    parse_option({get, Get}, parse_option({put, Put}, S#statebox_riak{obj_module = riakc_obj})).
 
 resolve_box(_Bucket, _Key, {ok, O},
-            #statebox_riak{deserialize=Deserialize, from_values=FromValues}) ->
+            #statebox_riak{deserialize=Deserialize, from_values=FromValues, obj_module=ObjModule}) ->
     {O, FromValues(
-          lists:map(Deserialize, riakc_obj:get_values(O)))};
+          lists:map(Deserialize, ObjModule:get_values(O)))};
 resolve_box(Bucket, Key, {error, notfound},
-            #statebox_riak{from_values=FromValues}) ->
-    {riakc_obj:new(Bucket, Key),
-     FromValues([])}.
-
+            #statebox_riak{from_values=FromValues, obj_module=ObjModule}) ->
+    case ObjModule of
+        riak_object ->
+            {ObjModule:new(maybe_binary(Bucket), maybe_binary(Key), FromValues([])), FromValues([])};
+        _ ->
+            {ObjModule:new(Bucket, Key), FromValues([])}
+    end.
 serialize(V, #statebox_riak{expire=Expire,
                             truncate=Truncate,
                             serialize=Serialize}) ->
     Serialize(Truncate(Expire(V))).
 
-update_value(O, Value, #statebox_riak{resolve_metadatas=ResolveMetadatas}) ->
+update_value(O, Value, #statebox_riak{resolve_metadatas=ResolveMetadatas, obj_module=ObjModule}) ->
     ResolveMetadatas(
-      riakc_obj:update_value(O, Value),
-      riakc_obj:get_metadatas(O)).
+      ObjModule:update_value(O, Value),
+      ObjModule:get_metadatas(O)).
+      
+maybe_binary(V) when is_binary(V) ->
+    V;
+maybe_binary(V) when is_list(V) ->
+    list_to_binary(V).
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
