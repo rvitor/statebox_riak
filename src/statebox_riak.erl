@@ -197,8 +197,8 @@ parse_option({resolve_metadatas, ResolveMetadatas}, S) ->
 parse_option({from_values, FromValues}, S) ->
     S#statebox_riak{from_values=FromValues};
 parse_option({native_client, Client}, S) ->
-    Get = fun (Bucket, Key) -> Client:get(Bucket, maybe_binary(Key)) end,
-    Put = fun (Obj) -> ok = Client:put(Obj) end,
+    Get = fun (Bucket, Key) -> Client:get(Bucket, maybe_binary(Key), 3) end,
+    Put = fun (Obj) -> ok = Client:put(Obj, 3) end,
     parse_option({get, Get}, parse_option({put, Put}, S#statebox_riak{obj_module = riak_object}));
 parse_option({riakc_pb_socket, Pid}, S) ->
     Get = fun (Bucket, Key) -> riakc_pb_socket:get(Pid, Bucket, Key) end,
@@ -227,6 +227,8 @@ update_value(O, Value, #statebox_riak{resolve_metadatas=ResolveMetadatas, obj_mo
       ObjModule:update_value(O, Value),
       ObjModule:get_metadatas(O)).
       
+maybe_binary(V) when is_integer(V) ->
+    list_to_binary(integer_to_list(V));
 maybe_binary(V) when is_binary(V) ->
     V;
 maybe_binary(V) when is_list(V) ->
