@@ -215,7 +215,7 @@ resolve_box(Bucket, Key, {error, notfound},
         riak_object ->
             {ObjModule:new(maybe_binary(Bucket), maybe_binary(Key), FromValues([])), FromValues([])};
         _ ->
-            {ObjModule:new(Bucket, Key), FromValues([])}
+            {ObjModule:new(maybe_binary(Bucket), maybe_binary(Key)), FromValues([])}
     end.
 serialize(V, #statebox_riak{expire=Expire,
                             truncate=Truncate,
