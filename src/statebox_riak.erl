@@ -201,8 +201,27 @@ parse_option({native_client, Client}, S) ->
     Put = fun (Obj) -> ok = Client:put(Obj, 2) end,
     parse_option({get, Get}, parse_option({put, Put}, S#statebox_riak{obj_module = riak_object}));
 parse_option({riakc_pb_socket, Pid}, S) ->
-    Get = fun (Bucket, Key) -> riakc_pb_socket:get(Pid, Bucket, maybe_binary(Key)) end,
-    Put = fun (Obj) -> ok = riakc_pb_socket:put(Pid, Obj) end,
+    Get = fun (Bucket, Key) ->
+               case riakc_pb_socket:get(Pid, Bucket, maybe_binary(Key), 180000) of
+                       {error,<<"timeout">>} ->
+                               riakc_pb_socket:get(Pid, Bucket, maybe_binary(Key), 180000);
+                       {error,timeout} ->
+                               riakc_pb_socket:get(Pid, Bucket, maybe_binary(Key), 180000);
+                       Rep ->
+                               Rep
+               end
+    end,
+    Put = fun (Obj) -> case riakc_pb_socket:put(Pid, Obj, 180000) of
+                       ok ->
+                               ok;
+                       {error, <<"timeout">>} ->
+                               riakc_pb_socket:put(Pid, Obj, 180000);
+                       {error, timeout} ->
+                               riakc_pb_socket:put(Pid, Obj, 180000);
+                       A ->
+                               A
+               end
+    end,
     parse_option({get, Get}, parse_option({put, Put}, S#statebox_riak{obj_module = riakc_obj})).
 
 resolve_box(_Bucket, _Key, {ok, O},
